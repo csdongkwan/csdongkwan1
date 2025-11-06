@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# 1. 필수 패키지 설치
+sudo apt update
+sudo apt install -y isc-dhcp-server iptables-persistent bridge-utils
+
+# 2. eth0~eth3 브릿지 구성
+sudo ip link add name br0 type bridge
+sudo ip link set eth0 master br0
+sudo ip link set eth1 master br0
+sudo ip link set eth2 master br0
+sudo ip link set eth3 master br0
+sudo ip link set br0 up
+
+# 3. br0 내부망 IP 설정
+sudo ip addr add 192.168.50.1/24 dev br0
+
+# 4. usb0는 DHCP 클라이언트로 외부 인터넷에서 IP를 받음
+sudo dhclient usb0
+
+# 5. DHCP 서버 설정 파일 작성
+cat << EOF | sudo tee /etc/dhcp/dhcpd.conf
+subnet 192.168.50.0 netmask 255.255.255.0 {
+  range 192.168.50.100 192.168.50.200;
+  option routers 192.168.50.1;
+  option domain-name-servers 8.8.8.8, 8.8.4.4;
+}
+EOF
+
+# 6. DHCP 서버가 br0 인터페이스를 감시하도록 지정
+sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="br0"/' /etc/default/isc-dhcp-server
+
+# 7. DHCP 서버 재시작 및 활성화
+sudo systemctl restart isc-dhcp-server
+sudo systemctl enable isc-dhcp-server
+
+# 8. IP 포워딩 활성화
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# 9. NAT 구성 (usb0를 통해 외부 인터넷 공유)
+sudo iptables -t nat -A POSTROUTING -o usb0 -j MASQUERADE
+
+# 10. iptables 규칙 저장
+sudo netfilter-persistent save
