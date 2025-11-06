@@ -1,0 +1,11 @@
+[Unit]
+Description=Raspberry Pi Network Bridge DHCP NAT Setup
+After=network.target
+
+[Service]
+ExecStart=/home/pi/raspberry_setup.sh
+Type=oneshot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
