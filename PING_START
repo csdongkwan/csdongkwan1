@@ -1,0 +1,26 @@
+#!/bin/bash
+
+SERVICE_URL="https://raw.githubusercontent.com/csdongkwan/csdongkwan1/main/ping-reboot.service"
+SERVICE_PATH="/etc/systemd/system/ping-reboot.service"
+
+# 다운로드 (root 권한 필요)
+echo "Downloading ping-reboot.service..."
+sudo wget "$SERVICE_URL" -O "$SERVICE_PATH"
+
+# 권한 설정
+echo "Setting permissions..."
+sudo chmod 644 "$SERVICE_PATH"
+
+# systemd 데몬 리로드
+echo "Reloading systemd daemon..."
+sudo systemctl daemon-reload
+
+# 서비스 자동 시작 활성화
+echo "Enabling ping-reboot.service..."
+sudo systemctl enable ping-reboot.service
+
+# 서비스 시작
+echo "Starting ping-reboot.service..."
+sudo systemctl start ping-reboot.service
+
+echo "ping-reboot.service installed and started successfully."
