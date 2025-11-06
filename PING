@@ -1,0 +1,20 @@
+#!/bin/bash
+
+TARGET_IP="8.8.8.8"           # Ping 테스트할 외부 IP (Google DNS 등)
+FAIL_LIMIT=12                 # 5초 간격 12번 = 1분 (12 * 5초 = 60초)
+FAIL_COUNT=0
+
+while true; do
+    if ping -c 1 -W 1 $TARGET_IP > /dev/null; then
+        FAIL_COUNT=0
+    else
+        ((FAIL_COUNT++))
+    fi
+
+    if [ $FAIL_COUNT -ge $FAIL_LIMIT ]; then
+        echo "$(date): Ping 실패 1분 이상, 시스템 재부팅" >> /var/log/ping-reboot.log
+        sudo reboot
+    fi
+
+    sleep 5
+done
