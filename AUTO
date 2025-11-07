@@ -1,11 +1,12 @@
 [Unit]
-Description=Raspberry Pi Network Bridge DHCP NAT Setup
+Description=Run IP script at startup
 After=network.target
 
 [Service]
-ExecStart=/home/pi/raspberry_setup.sh
-Type=oneshot
-RemainAfterExit=yes
+Type=simple
+ExecStart=/home/pi/IP
+User=pi
+Restart=no
 
 [Install]
 WantedBy=multi-user.target
