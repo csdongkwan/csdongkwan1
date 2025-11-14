@@ -1,56 +1,86 @@
-cat << 'EOF' > /home/pi/raspberry_setup.sh
 #!/bin/bash
 
+set -e
+
+# 권한 체크
+if [ "$EUID" -ne 0 ]; then
+  echo "이 스크립트는 root 권한으로 실행해야 합니다. sudo를 사용하세요."
+  exit 1
+fi
+
 # 필수 패키지 설치
-sudo apt update
-sudo apt install -y isc-dhcp-server iptables-persistent bridge-utils
+apt update
+apt install -y isc-dhcp-server iptables-persistent bridge-utils
 
 # 기존 브릿지 삭제(존재 시)
-sudo ip link set br0 down 2>/dev/null
-sudo ip link del br0 2>/dev/null || true
+ip link show br0 &>/dev/null && {
+  ip link set br0 down
+  ip link del br0
+}
 
-# 브릿지 생성 및 eth0~eth3 추가
-sudo ip link add name br0 type bridge
-sudo ip link set eth0 master br0
-sudo ip link set eth1 master br0
-sudo ip link set eth2 master br0
-sudo ip link set eth3 master br0
-sudo ip link set br0 up
+# 사용 가능한 이더넷 인터페이스만 브릿지에 추가
+BRIDGE_IFACES=()
+for IFACE in eth0 eth1 eth2 eth3; do
+  ip link show $IFACE &>/dev/null && BRIDGE_IFACES+=($IFACE)
+done
+
+# 브릿지 생성 및 이더넷 인터페이스 추가
+ip link add name br0 type bridge
+
+for IFACE in "${BRIDGE_IFACES[@]}"; do
+  ip link set $IFACE master br0
+done
+
+ip link set br0 up
 
 # br0에 IP 할당 (내부 LAN 게이트웨이)
-sudo ip addr flush dev br0
-sudo ip addr add 192.168.50.1/24 dev br0
+ip addr flush dev br0
+ip addr add 192.168.50.1/24 dev br0
 
-# usb0 (LTE 동글이)에서 IP 할당 (DHCP 클라이언트)
-sudo dhclient -v usb0
+# usb0 (LTE 동글) 인터페이스가 활성화되고 IP 할당 받을 때까지 재시도
+RETRY=10
+while [[ $RETRY -gt 0 ]]; do
+  ip link show usb0 &>/dev/null && break
+  echo "usb0 인터페이스 감지 대기중..."
+  sleep 3
+  ((RETRY--))
+done
+
+if [[ $RETRY -eq 0 ]]; then
+  echo "usb0 인터페이스를 찾을 수 없습니다. 연결 상태 확인 필요."
+  exit 1
+fi
+
+dhclient -v usb0
+
+# 기존 DHCP 설정 백업
+[ -f /etc/dhcp/dhcpd.conf ] && cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak.$(date +"%Y%m%d%H%M%S")
 
 # DHCP 서버 구성
-cat << EOD | sudo tee /etc/dhcp/dhcpd.conf
+cat > /etc/dhcp/dhcpd.conf <<EOF
 subnet 192.168.50.0 netmask 255.255.255.0 {
   range 192.168.50.100 192.168.50.200;
   option routers 192.168.50.1;
   option domain-name-servers 8.8.8.8, 8.8.4.4;
 }
-EOD
-
-# DHCP 서버 브릿지 인터페이스 지정
-sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="br0"/' /etc/default/isc-dhcp-server
-
-# DHCP 서버 재시작 및 활성화
-sudo systemctl restart isc-dhcp-server
-sudo systemctl enable isc-dhcp-server
-
-# IP 포워딩 활성화 (영구)
-sudo sed -i '/^net.ipv4.ip_forward=1$/d' /etc/sysctl.conf
-echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -w net.ipv4.ip_forward=1
-
-# NAT 설정 (usb0를 통한 인터넷 공유)
-sudo iptables -t nat -D POSTROUTING -o usb0 -j MASQUERADE 2>/dev/null || true
-sudo iptables -t nat -A POSTROUTING -o usb0 -j MASQUERADE
-
-# iptables 규칙 저장
-sudo netfilter-persistent save
 EOF
 
-chmod +x /home/pi/raspberry_setup.sh
+# DHCP 서버 브릿지 인터페이스 지정
+sed -i 's/^INTERFACESv4=.*/INTERFACESv4="br0"/' /etc/default/isc-dhcp-server
+
+# DHCP 서버 재시작 및 활성화
+systemctl restart isc-dhcp-server
+systemctl enable isc-dhcp-server
+
+# IP 포워딩 활성화 (영구)
+grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -w net.ipv4.ip_forward=1
+
+# iptables NAT 설정 (usb0를 통한 인터넷 공유)
+iptables -t nat -D POSTROUTING -o usb0 -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -o usb0 -j MASQUERADE
+
+# iptables 저장
+netfilter-persistent save
+
+echo "설정 완료되었습니다. 재부팅 후에도 적용됩니다."
